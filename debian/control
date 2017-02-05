@@ -1,0 +1,13 @@
+Source: yoga-spin-gui
+Section: misc
+Priority: extra
+Maintainer: Jan Kirschner <honkir@seznam.cz>
+Build-Depends: debhelper (>> 5.0.0)
+Standards-Version: 3.8.4
+Homepage: https://github.com/honkir/yoga-spin-gui
+
+Package: yoga-spin-gui
+Architecture: all
+Depends: yoga-spin, python-pyqt5, onboard
+Description: GUI for yoga spin for selecting mode after lid position changes
+ .

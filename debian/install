@@ -1,0 +1,2 @@
+yoga-spin-gui.py usr/bin/
+package/autostart/yoga-spin-gui-autostart.desktop etc/xdg/autostart/
