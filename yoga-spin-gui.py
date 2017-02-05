@@ -8,7 +8,7 @@ import socket
 import logging
 
 from PyQt5.QtWidgets import QApplication, QWidget, QDesktopWidget, QPushButton, QSystemTrayIcon, QMenu, QHBoxLayout, QVBoxLayout
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QKeyEvent
 from PyQt5.QtCore import QSize, QObject, pyqtSignal, QTimer, Qt
 
 
@@ -169,6 +169,16 @@ class Controller(object):
 
 # endclass
 
+
+class KeyHandlingWidget(QWidget):
+    keyPressed = pyqtSignal(QKeyEvent)
+
+    def keyPressEvent(self, event):
+        super(KeyHandlingWidget, self).keyPressEvent(event)
+        self.keyPressed.emit(event)
+#endclass
+
+
 class LidControlView(object):
     SUBMIT_BTN_SIZE = 100
     SWITCH_BTN_SIZE = 80
@@ -242,7 +252,7 @@ class LidControlView(object):
         vbox.addStretch()
 
         # main window
-        self._window = QWidget()
+        self._window = KeyHandlingWidget()
         self._window.setLayout(vbox)
         self._window.setWindowModality(2)
         self._window.setWindowFlags(Qt.WindowStaysOnTopHint)
@@ -256,6 +266,8 @@ class LidControlView(object):
         # set window title and icon
         self._window.setWindowTitle('Lid Control')
         self._window.setWindowIcon(QIcon('art/icon.svg'))
+
+        self._window.keyPressed.connect(self.EventKeyPressed)
     # enddef
 
     def EventChangeOrientation(self):
@@ -285,6 +297,10 @@ class LidControlView(object):
 
     def IsVisible(self):
         return self._window.isVisible()
+
+    def EventKeyPressed(self, event):
+        if event.key() == Qt.Key_Escape:
+            self.Show(False)
 #endclass
 
 
@@ -353,10 +369,11 @@ if __name__ == '__main__':
     sys.exit(app.exec_())
 
 # notes
-# * close using ESC
 # * run touch keyboard
 # * icons change to better indicate the mode (lock to disappear, cross over the touch screen)
-
+# * an easy way to enable touch
+# * large close button 
+# * automatically enable touch screen when lid position changes so that you can control the dialogue
 
 
 
