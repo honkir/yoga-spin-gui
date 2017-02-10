@@ -4,6 +4,7 @@
 
 import sys
 import os
+import signal
 import socket
 import logging
 
@@ -44,18 +45,18 @@ class SpinServerProxy(object):
             self._send_command("laptop")
 
         # orientation
-        print "*** Setting Orientation ***"
+        log.debug("*** Setting Orientation ***")
         orientationCommands = ("normal", "right", "inverted", "left")
         self._send_command(orientationCommands[state.orientation])
 
         # touch screen
-        print "*** Setting Touch Screen ***"
+        log.debug("*** Setting Touch Screen ***")
         self._send_command("touchenable" if state.enableTouch else "touchdisable")
         
         # accelerometer
-        print "*** Setting Rotation Lock ***"
+        log.debug("*** Setting Rotation Lock ***")
         self._send_command("rotatelock" if state.lockRotation else "rotateunlock")
-        print "*** Done ***"
+        log.debug("*** Done ***")
     #enddef
 
     def _send_command(self, command):
@@ -64,13 +65,33 @@ class SpinServerProxy(object):
             try:
                 command_socket.connect(self._SPIN_SOCKET)
                 command_socket.send(command)
-                print "Connected to socket"
+                log.debug("Connected to socket")
             except Exception, e:
-                print "Failed to send mode change to the spin daemon: %s" % (e, )
+                log.error("Failed to send mode change to the spin daemon: %s" % (e, ))
         else:
-            print "Socket does not exist. Is the spin deamon running."
+            log.error("Socket does not exist. Is the spin deamon running.")
     #enddef
 
+#endclass
+
+
+class TouchKeyboardHandler(object):
+    _runCommand = "/usr/bin/onboard"  # TODO - is a python application and could be run directly
+
+    def __init__(self):
+        self._pid = None
+
+    def Start(self):
+        if not self._pid:
+            self._pid = os.spawnl(os.P_NOWAIT, self._runCommand, "onboard")
+            log.debug("Started command %d" % (self._pid, ))
+    #enddef
+
+    def Close(self):
+        if self._pid != None:
+            os.kill(self._pid, signal.SIGTERM)
+            self._pid = None
+    #enddef
 #endclass
 
 
@@ -105,7 +126,6 @@ class EventListener(QObject):
             return
 
         log.debug("ACPI event: {0}".format(event_ACPI))
-        print "ACPI event: {0}".format(event_ACPI)
 
         display_position_event = "ibm/hotkey LEN0068:00 00000080 000060c0\n"
         rotation_lock_event = "ibm/hotkey LEN0068:00 00000080 00006020\n"
@@ -127,6 +147,7 @@ class Controller(object):
         self._view = None
         self._state = ScreenControlState()
         self._serverProxy = SpinServerProxy()
+        self._touchKeyboard = TouchKeyboardHandler()
  
     def SetView(self, view):
         self._view = view
@@ -143,15 +164,15 @@ class Controller(object):
 
     def OnToggleTouch(self, status):
         self._state.enableTouch = status
-        print "Touch enabled: %d" % ((1 if status else 0), )
+        log.debug("Touch enabled: %d" % ((1 if status else 0), ))
 
     def OnToggleOrientationLock(self, status):
         self._state.lockRotation = status
-        print "Orientation locked: %d" % ((1 if status else 0), )
+        log.debug("Orientation locked: %d" % ((1 if status else 0), ))
 
     def OnChangeOrientation(self, orientation):
         self._state.orientation = orientation
-        print "Orientation set: %d" % (orientation, )
+        log.debug("Orientation set: %d" % (orientation, ))
 
     def OnSubmitMode(self, mode):
         self._state.mode = mode
@@ -159,7 +180,7 @@ class Controller(object):
 
         self._serverProxy.SetState(self._state)
 
-        print "Mode submitted: %d" % (mode, )
+        log.info("Mode submitted: %d" % (mode, ))
     # enddef
 
     def HandleIncomingEvent(self, command):
@@ -167,15 +188,30 @@ class Controller(object):
             self.OnActivate()
     #enddef
 
+    def OnWindowClosed(self):
+        if self._state.mode == ScreenControlState.MODE_LAPTOP:
+            self._touchKeyboard.Close()
+        else:
+            self._touchKeyboard.Start()
+    #enddef
+
 # endclass
 
 
 class KeyHandlingWidget(QWidget):
     keyPressed = pyqtSignal(QKeyEvent)
+    closed = pyqtSignal()
 
     def keyPressEvent(self, event):
         super(KeyHandlingWidget, self).keyPressEvent(event)
         self.keyPressed.emit(event)
+
+    def closeEvent(self, event):
+        """
+        Announces closing the window by clicking the cross button in the top-right corner. Not triggered by setVisible(False).
+        """
+        self.closed.emit()
+        super(KeyHandlingWidget, self).closeEvent(event)
 #endclass
 
 
@@ -185,8 +221,15 @@ class LidControlView(object):
 
     SCREEN_ORIENTATION_ICON = ('orientation-up.svg', 'orientation-right.svg', 'orientation-down.svg', 'orientation-left.svg')
 
-    def __init__(self, app, controller):
+    def _toggle_touch_icon(self, enabled):
+        return self._iconPath + "/" + ("toggle-touch.svg" if enabled else "toggle-touch-off.svg")
+
+    def _toggle_rotation_icon(self, locked):
+        return self._iconPath + "/" + ("toggle-lock.svg" if locked else "toggle-unlock.svg")
+
+    def __init__(self, app, controller, iconPath = "./"):
         self._controller = controller
+        self._iconPath = iconPath
         initState = controller.GetState()
 
         # 0=up, 1=right, 2=down, 3=left
@@ -194,24 +237,26 @@ class LidControlView(object):
 
         btnTouch = QPushButton()
         btnTouch.setCheckable(True)
-        btnTouch.setIcon(QIcon("art/toggle-touch.svg"))
+        btnTouch.setIcon(QIcon(self._toggle_touch_icon(initState.enableTouch)))
         btnTouch.setIconSize(QSize(self.SWITCH_BTN_SIZE, self.SWITCH_BTN_SIZE))
         btnTouch.setToolTip('Enable touch screen.')
         btnTouch.resize(btnTouch.sizeHint())
         btnTouch.setChecked(initState.enableTouch)
         btnTouch.toggled.connect(self.EventToggleTouch)
+        self._toggleTouchBtn = btnTouch
 
         btnScreenLck = QPushButton()
         btnScreenLck.setCheckable(True)
-        btnScreenLck.setIcon(QIcon("art/toggle-lock.svg"))
+        btnScreenLck.setIcon(QIcon(self._toggle_rotation_icon(initState.lockRotation)))
         btnScreenLck.setIconSize(QSize(self.SWITCH_BTN_SIZE, self.SWITCH_BTN_SIZE))
         btnScreenLck.setToolTip('Lock screen not to be rotated by accelerometer.')
         btnScreenLck.resize(btnScreenLck.sizeHint())
         btnScreenLck.setChecked(initState.lockRotation)
         btnScreenLck.toggled.connect(self.EventToggleLock)
+        self._rotationLockBtn = btnScreenLck
 
         btnScreenOri = QPushButton()
-        btnScreenOri.setIcon(QIcon("art/" + self.SCREEN_ORIENTATION_ICON[self._screenOrientation]))
+        btnScreenOri.setIcon(QIcon(iconPath + "/" + self.SCREEN_ORIENTATION_ICON[self._screenOrientation]))
         btnScreenOri.setIconSize(QSize(self.SWITCH_BTN_SIZE, self.SWITCH_BTN_SIZE))
         btnScreenOri.setToolTip('Select screen orientation.')
         btnScreenOri.resize(btnScreenOri.sizeHint())
@@ -227,14 +272,14 @@ class LidControlView(object):
 
 
         btnLaptop = QPushButton()
-        btnLaptop.setIcon(QIcon("art/mode-laptop.svg"))
+        btnLaptop.setIcon(QIcon(iconPath + "/mode-laptop.svg"))
         btnLaptop.setIconSize(QSize(self.SUBMIT_BTN_SIZE, self.SUBMIT_BTN_SIZE))
         btnLaptop.setToolTip('Pick <b>laptop mode</b> preset.')
         btnLaptop.resize(btnLaptop.sizeHint())
         btnLaptop.clicked.connect(self.EventSubmitLaptopMode)
 
         btnTablet = QPushButton()
-        btnTablet.setIcon(QIcon("art/mode-tablet.svg"))
+        btnTablet.setIcon(QIcon(iconPath + "/mode-tablet.svg"))
         btnTablet.setIconSize(QSize(self.SUBMIT_BTN_SIZE, self.SUBMIT_BTN_SIZE))
         btnTablet.setToolTip('Pick <b>tablet mode</b> preset.')
         btnTablet.resize(btnTablet.sizeHint())
@@ -265,22 +310,25 @@ class LidControlView(object):
 
         # set window title and icon
         self._window.setWindowTitle('Lid Control')
-        self._window.setWindowIcon(QIcon('art/icon.svg'))
+        self._window.setWindowIcon(QIcon(iconPath + '/icon.svg'))
 
         self._window.keyPressed.connect(self.EventKeyPressed)
+        self._window.closed.connect(self._controller.OnWindowClosed)
     # enddef
 
     def EventChangeOrientation(self):
         self._screenOrientation = (self._screenOrientation + 1) % 4
-        self._screenOrientationBtn.setIcon(QIcon("art/" + self.SCREEN_ORIENTATION_ICON[self._screenOrientation]))
+        self._screenOrientationBtn.setIcon(QIcon(self._iconPath + "/" + self.SCREEN_ORIENTATION_ICON[self._screenOrientation]))
         self._controller.OnChangeOrientation(self._screenOrientation)
     # enddef
 
     def EventToggleTouch(self, checked):
+        self._toggleTouchBtn.setIcon(QIcon(self._toggle_touch_icon(checked)))
         self._controller.OnToggleTouch(checked)
     #enddef
 
     def EventToggleLock(self, checked):
+        self._rotationLockBtn.setIcon(QIcon(self._toggle_rotation_icon(checked)))
         self._controller.OnToggleOrientationLock(checked)
     #enddef
 
@@ -293,7 +341,11 @@ class LidControlView(object):
     #enddef
 
     def Show(self, show = True):
+        if self.IsVisible() and not show :
+            self._controller.OnWindowClosed()
+
         self._window.setVisible(show)
+    #enddef
 
     def IsVisible(self):
         return self._window.isVisible()
@@ -305,13 +357,14 @@ class LidControlView(object):
 
 
 class LidControlMenu(object):
-    def __init__(self, app, controller):
+    def __init__(self, app, controller, iconPath = "./"):
         """
         """
         self._controller = controller
+        self._iconPath = iconPath
 
         # system tray
-        self._trayIcon = QSystemTrayIcon(QIcon("art/icon-sq.png"), app)
+        self._trayIcon = QSystemTrayIcon(QIcon(iconPath + "/icon-sq.png"), app)
         menu = QMenu("Lid Control")
 
         activateAction = menu.addAction("Lid Control")
@@ -320,7 +373,7 @@ class LidControlMenu(object):
         menu.addSeparator()
 
         # exit menu entry
-        exitAction = menu.addAction(QIcon("art/icon-exit.svg"), "Exit")
+        exitAction = menu.addAction(QIcon(iconPath + "/icon-exit.svg"), "Exit")
         exitAction.triggered.connect(app.quit)
         self._trayIcon.setContextMenu(menu)
 
@@ -341,24 +394,31 @@ class LidControlMenu(object):
         self._trayIcon.showMessage(title, message)
 #endclass
 
-
+def ResolveResourcesPath():
+    if os.getcwd().find("/usr/bin") == 0:
+        return "/usr/share/yoga-spin-gui/art"
+    else:
+        return "./art"
+#enddef
 
 if __name__ == '__main__':
     global log
     log = logging.getLogger()
     logHandler = logging.StreamHandler()
     log.addHandler(logHandler)
-    logHandler.setFormatter(logging.Formatter("%(message)s"))
-    log.level = 10 #debug
+    logHandler.setFormatter(logging.Formatter("[%(asctime)-15s] (" + str(os.getpid()) + ") %(message)s"))
+    log.level = logging.INFO
+
+    iconPath = ResolveResourcesPath()
 
     app = QApplication(sys.argv)
 
     controller = Controller()
 
-    tray = LidControlMenu(app, controller)
+    tray = LidControlMenu(app, controller, iconPath)
     tray.Show()
 
-    view = LidControlView(app, controller)
+    view = LidControlView(app, controller, iconPath)
     view.Show()
 
     eventListener = EventListener()
@@ -369,11 +429,9 @@ if __name__ == '__main__':
     sys.exit(app.exec_())
 
 # notes
-# * run touch keyboard
-# * icons change to better indicate the mode (lock to disappear, cross over the touch screen)
+# * automatically enable touch screen when lid position changes so that you can control the dialogue
 # * an easy way to enable touch
 # * large close button 
-# * automatically enable touch screen when lid position changes so that you can control the dialogue
 
 
 
