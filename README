@@ -1,0 +1,10 @@
+
+Yoga Spin GUI
+=============
+
+
+Building the package:
+
+# dpkg-buildpackage -rfakeroot
+
+

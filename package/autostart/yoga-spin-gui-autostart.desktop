@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Yoga Spin GUI
-Exec=yoga-spin-gui.py
+Exec=yoga-spin-gui.py -f /etc/yoga-spin-gui.config
 Terminal=false
 Type=Application
 X-GNOME-Autostart-Phase=Initialization

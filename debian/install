@@ -1,3 +1,4 @@
 yoga-spin-gui.py usr/bin/
 package/autostart/yoga-spin-gui-autostart.desktop etc/xdg/autostart/
 art/* usr/share/yoga-spin-gui/art/
+package/yoga-spin-gui.config etc/
