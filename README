@@ -2,12 +2,21 @@
 Yoga Spin GUI
 =============
 
+Switching touchpad for Yoga laptops when lid position changes, GUI for enabling/disabling finger touch screen if used with stylus.
+
+Features:
+ * Run on startup, systray entry with context menu available
+ * When lid moves to tablet mode makes sure touch screen is enabled and starts OnBoard touch keyboard. Also disables touch pad.
+ * When lid moves to laptop mode terminates OnBoard touch keyboard and enables touch pad.
+ * Dialog for enabling and disabling touch screen for purpose of working only with the stylus.
+
 
 Building debian package:
+------------------------
 
 `# dpkg-buildpackage -rfakeroot`
 
-Adding changelog entry using `dch` from package devscripts.
+Adding changelog entry using `dch` from package devscripts:
 
 `# dch -v X.Y.Z "message"`
 `# dch --release`
