@@ -1,0 +1,10 @@
+
+# packaging files
+debian/files
+debian/yoga-spin-gui/
+debian/yoga-spin-gui.substvars
+debian/yoga-spin-gui.debhelper.log
+
+# debugging temp files
+yoga-spin-gui.log
+

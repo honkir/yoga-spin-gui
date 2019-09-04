@@ -1,5 +1,14 @@
-yoga-spin-gui (0.0.1) UNRELEASED; urgency=medium
+yoga-spin-gui (0.1.0) bionic; urgency=medium
+
+  * Removed dependency on yoga-spin package, removed functionality
+    already available in Kubuntu 18.4 and removed screen rotation stuff
+    because https://github.com/dos1/kded_rotation/ handles that better
+    using iio-sensor-proxy
+
+ -- Jan Kirschner <honkir@honkir-yoga>  Wed, 04 Sep 2019 19:50:53 +0200
+
+yoga-spin-gui (0.0.1) bionic; urgency=medium
 
   * Initial release.
 
- -- Jan Kirschner <honkir@seznam.cz>  Sun, 05 Feb 2017 21:49:23 +0100
+ -- Jan Kirschner <honkir@honkir-yoga>  Wed, 04 Sep 2019 19:50:17 +0200

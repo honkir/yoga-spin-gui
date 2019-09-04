@@ -8,6 +8,6 @@ Homepage: https://github.com/honkir/yoga-spin-gui
 
 Package: yoga-spin-gui
 Architecture: all
-Depends: python-pyqt5, onboard, yoga-spin
-Description: GUI for yoga spin for selecting mode after lid position changes
+Depends: python-pyqt5, onboard
+Description: Switching touchpad for Yoga laptops when lid position changes, GUI for enabling/disabling finger touch screen if used with stylus.
  .

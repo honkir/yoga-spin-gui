@@ -3,8 +3,14 @@ Yoga Spin GUI
 =============
 
 
-Building the package:
+Building debian package:
 
-# dpkg-buildpackage -rfakeroot
+`# dpkg-buildpackage -rfakeroot`
+
+Adding changelog entry using `dch` from package devscripts.
+
+`# dch -v X.Y.Z "message"`
+`# dch --release`
+
 
 

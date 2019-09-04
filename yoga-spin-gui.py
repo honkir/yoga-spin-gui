@@ -8,6 +8,7 @@ import signal
 import socket
 import logging
 import getopt
+import subprocess
 import ConfigParser
 
 from PyQt5.QtWidgets import QApplication, QWidget, QDesktopWidget, QPushButton, QSystemTrayIcon, QMenu, QHBoxLayout, QVBoxLayout
@@ -68,61 +69,9 @@ class ScreenControlState(object):
     def __init__(self):
         # init defaults
         self.mode = self.MODE_LAPTOP
-        self.orientation = 0 # up
         self.lockRotation = True
         self.enableTouch = True
     # enddef
-#endclass
-
-
-class SpinServerProxy(object):
-    """
-    Interface to the yoga-spin server
-    """
-    _SPIN_SOCKET = '/tmp/yoga_spin.socket'
-    
-    def __init__(self):
-        pass
-
-    def SetState(self, state):
-        # mode
-        log.debug("Setting Mode: %s" % (state.mode, ))
-        if state.mode == ScreenControlState.MODE_TABLET:
-            self._send_command("tablet")
-        else:
-            self._send_command("laptop")
-
-        # orientation
-        orientationCommands = ("normal", "right", "inverted", "left")
-        log.debug("Setting Orientation: %s" % (orientationCommands[state.orientation], ))
-        self._send_command(orientationCommands[state.orientation])
-
-        # touch screen
-        log.debug("Setting Touch Screen: %s" % (state.enableTouch, ))
-        self.EnableTouch(state.enableTouch)
-        
-        # accelerometer
-        log.debug("Setting Rotation Lock: %s" % (state.lockRotation, ))
-        self._send_command("rotatelock" if state.lockRotation else "rotateunlock")
-        log.debug("Done")
-    #enddef
-
-    def EnableTouch(self, enable = True):
-        self._send_command("touchenable" if enable else "touchdisable")
-
-    def _send_command(self, command):
-        if os.path.exists(self._SPIN_SOCKET):
-            command_socket = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-            try:
-                command_socket.connect(self._SPIN_SOCKET)
-                command_socket.send(command)
-                log.debug("Connected to socket")
-            except Exception, e:
-                log.error("Failed to send mode change to the spin daemon: %s" % (e, ))
-        else:
-            log.error("Socket does not exist. Is the spin deamon running.")
-    #enddef
-
 #endclass
 
 
@@ -140,6 +89,96 @@ class TouchKeyboardHandler(object):
         if self._pid != None:
             os.kill(self._pid, signal.SIGTERM)
             self._pid = None
+    #enddef
+#endclass
+
+
+class XInputProxy(object):
+    def __init__(self):
+        self._deviceNames = {}
+
+    def InitDeviceList(self):
+        log.info("Audit Inputs:")
+        input_devices = subprocess.Popen(
+            ["xinput", "list", "--name-only"],
+            stdin = subprocess.PIPE,
+            stdout = subprocess.PIPE,
+            stderr = subprocess.PIPE
+        ).communicate()[0]
+
+        devices_and_keyphrases = {
+            "touchscreen": ["SYNAPTICS Synaptics Touch Digitizer V04",
+                            "ELAN Touchscreen",
+                            "Wacom Co.,Ltd. Pen and multitouch sensor Finger touch",
+                            "Wacom Pen and multitouch sensor Finger touch"],
+            "touchpad":    ["PS/2 Synaptics TouchPad",
+                            "SynPS/2 Synaptics TouchPad",
+                            "AlpsPS/2 ALPS DualPoint TouchPad"],
+        }
+
+        for device, keyphrases in devices_and_keyphrases.iteritems():
+            for keyphrase in keyphrases:
+                if keyphrase in input_devices:
+                    self._deviceNames[device] = keyphrase
+
+        for device, keyphrases in devices_and_keyphrases.iteritems():
+            if device in self._deviceNames:
+                log.info(" - {device} detected as \"{deviceName}\"".format(
+                    device     = device.title(),
+                    deviceName = self._deviceNames[device]
+                ))
+            else:
+                log.info(" - {device} not detected".format(
+                    device = device.title()
+                ))
+    #enddef
+
+    def TouchscreenSwitch(self, status = None):
+        if "touchscreen" in self._deviceNames:
+            xinput_status = {
+                True:  "enable",
+                False: "disable"
+            }
+
+            if xinput_status.has_key(status):
+                log.info("{status} touchscreen".format(
+                    status = xinput_status[status].title()
+                ))
+                os.system(
+                    "xinput {status} \"{device_name}\"".format(
+                        status = xinput_status[status],
+                        device_name = self._deviceNames["touchscreen"]
+                    )
+                )
+            else:
+                log.error("Unknown touchscreen status \"{0}\" requested".format(status))
+                sys.exit()
+        else:
+            log.debug("Touchscreen status unchanged")
+    #enddef
+    
+    def TouchpadSwitch(self, status = None):
+        if "touchpad" in self._deviceNames:
+            xinput_status = {
+                True:  "enable",
+                False: "disable"
+            }
+
+            if xinput_status.has_key(status):
+                log.info("{status} touchpad".format(
+                    status = xinput_status[status].title()
+                ))
+                os.system(
+                    "xinput {status} \"{device_name}\"".format(
+                        status = xinput_status[status],
+                        device_name = self._deviceNames["touchpad"]
+                    )
+                )
+            else:
+                log.error("Unknown touchpad status \"{0}\" requested".format(status))
+                sys.exit()
+        else:
+            log.debug("Touchpad status unchanged")
     #enddef
 #endclass
 
@@ -176,14 +215,18 @@ class EventListener(QObject):
 
         log.debug("ACPI event: {0}".format(event_ACPI))
 
-        display_position_event = "ibm/hotkey LEN0068:00 00000080 000060c0\n"
         rotation_lock_event = "ibm/hotkey LEN0068:00 00000080 00006020\n"
+        tablet_mode_event = "video/tabletmode TBLT 0000008A 00000001\n"
+        laptop_mode_event = "video/tabletmode TBLT 0000008A 00000000\n"
 
         if event_ACPI == rotation_lock_event:
             pass
-        elif event_ACPI == display_position_event:
-            log.info("Display position changed. Event not implemented.")
-            self.spinSignal.emit("display_position_change")
+        elif event_ACPI == tablet_mode_event:
+            log.info("Display position changed to tablet mode.")
+            self.spinSignal.emit("display_position_tablet")
+        elif event_ACPI == laptop_mode_event:
+            log.info("Display position changed to laptop mode.")
+            self.spinSignal.emit("display_position_laptop")
         else:
             log.debug("Unknown acpi event triggered: {0}".format(event_ACPI))
 
@@ -195,8 +238,10 @@ class Controller(object):
     def __init__(self):
         self._view = None
         self._state = ScreenControlState()
-        self._serverProxy = SpinServerProxy()
         self._touchKeyboard = TouchKeyboardHandler()
+        self._xInputProxy = XInputProxy()
+
+        self._xInputProxy.InitDeviceList()
  
     def SetView(self, view):
         self._view = view
@@ -210,46 +255,43 @@ class Controller(object):
     def OnActivate(self):
         if not self._view.IsVisible():
             self._view.Show()
-
             if not self._state.enableTouch:
-                self._state.enableTouch = True
-                self._serverProxy.EnableTouch()
-                self._view.SetTouchEnableState(True)
-            #endif
+                self.OnToggleTouch(True)
         #endif
     #enddef
 
     def OnToggleTouch(self, status):
         self._state.enableTouch = status
+        self._xInputProxy.TouchscreenSwitch(status)
+        self._view.SetTouchEnableState(status)
         log.debug("Touch enabled: %d" % ((1 if status else 0), ))
 
     def OnToggleOrientationLock(self, status):
         self._state.lockRotation = status
         log.debug("Orientation locked: %d" % ((1 if status else 0), ))
 
-    def OnChangeOrientation(self, orientation):
-        self._state.orientation = orientation
-        log.debug("Orientation set: %d" % (orientation, ))
+    def OnTabletModeEnter(self):
+        self._touchKeyboard.Start()
+        self._xInputProxy.TouchpadSwitch(False)
+        self.OnToggleTouch(True)
+    #enddef
 
-    def OnSubmitMode(self, mode):
-        self._state.mode = mode
-        self._view.Show(False)
-
-        self._serverProxy.SetState(self._state)
-
-        log.info("Mode submitted: %d" % (mode, ))
-    # enddef
+    def OnLaptopModeEnter(self):
+        self._touchKeyboard.Close()
+        self._xInputProxy.TouchpadSwitch(True)
+    #enddef
 
     def HandleIncomingEvent(self, command):
-        if command == "display_position_change":
-            self.OnActivate()
+        if command == "display_position_tablet":
+            self._state.mode = ScreenControlState.MODE_TABLET
+            self.OnTabletModeEnter()
+        elif command == "display_position_laptop":
+            self._state.mode = ScreenControlState.MODE_LAPTOP
+            self.OnLaptopModeEnter()
     #enddef
 
     def OnWindowClosed(self):
-        if self._state.mode == ScreenControlState.MODE_LAPTOP:
-            self._touchKeyboard.Close()
-        else:
-            self._touchKeyboard.Start()
+        pass
     #enddef
 
 # endclass
@@ -273,10 +315,7 @@ class KeyHandlingWidget(QWidget):
 
 
 class LidControlView(object):
-    SUBMIT_BTN_SIZE = 100
     SWITCH_BTN_SIZE = 80
-
-    SCREEN_ORIENTATION_ICON = ('orientation-up.svg', 'orientation-right.svg', 'orientation-down.svg', 'orientation-left.svg')
 
     def _toggle_touch_icon(self, enabled):
         return config.iconPath + ("toggle-touch.svg" if enabled else "toggle-touch-off.svg")
@@ -287,9 +326,6 @@ class LidControlView(object):
     def __init__(self, app, controller):
         self._controller = controller
         initState = controller.GetState()
-
-        # 0=up, 1=right, 2=down, 3=left
-        self._screenOrientation = initState.orientation
 
         btnTouch = QPushButton()
         btnTouch.setCheckable(True)
@@ -311,45 +347,14 @@ class LidControlView(object):
         btnScreenLck.toggled.connect(self.EventToggleLock)
         self._rotationLockBtn = btnScreenLck
 
-        btnScreenOri = QPushButton()
-        btnScreenOri.setIcon(QIcon(config.iconPath + self.SCREEN_ORIENTATION_ICON[self._screenOrientation]))
-        btnScreenOri.setIconSize(QSize(self.SWITCH_BTN_SIZE, self.SWITCH_BTN_SIZE))
-        btnScreenOri.setToolTip('Select screen orientation.')
-        btnScreenOri.resize(btnScreenOri.sizeHint())
-        btnScreenOri.clicked.connect(self.EventChangeOrientation)
-        self._screenOrientationBtn = btnScreenOri
-
         customHBox = QHBoxLayout()
         customHBox.addStretch()
         customHBox.addWidget(btnTouch)
         customHBox.addWidget(btnScreenLck)
-        customHBox.addWidget(btnScreenOri)
         customHBox.addStretch()
-
-
-        btnLaptop = QPushButton()
-        btnLaptop.setIcon(QIcon(config.iconPath + "mode-laptop.svg"))
-        btnLaptop.setIconSize(QSize(self.SUBMIT_BTN_SIZE, self.SUBMIT_BTN_SIZE))
-        btnLaptop.setToolTip('Pick <b>laptop mode</b> preset.')
-        btnLaptop.resize(btnLaptop.sizeHint())
-        btnLaptop.clicked.connect(self.EventSubmitLaptopMode)
-
-        btnTablet = QPushButton()
-        btnTablet.setIcon(QIcon(config.iconPath + "mode-tablet.svg"))
-        btnTablet.setIconSize(QSize(self.SUBMIT_BTN_SIZE, self.SUBMIT_BTN_SIZE))
-        btnTablet.setToolTip('Pick <b>tablet mode</b> preset.')
-        btnTablet.resize(btnTablet.sizeHint())
-        btnTablet.clicked.connect(self.EventSubmitTabletMode)
-
-        modeHBox = QHBoxLayout()
-        modeHBox.addStretch()
-        modeHBox.addWidget(btnLaptop)
-        modeHBox.addWidget(btnTablet)
-        modeHBox.addStretch()
 
         vbox = QVBoxLayout()
         vbox.addLayout(customHBox)
-        vbox.addLayout(modeHBox)
         vbox.addStretch()
 
         # main window
@@ -372,12 +377,6 @@ class LidControlView(object):
         self._window.closed.connect(self._controller.OnWindowClosed)
     # enddef
 
-    def EventChangeOrientation(self):
-        self._screenOrientation = (self._screenOrientation + 1) % 4
-        self._screenOrientationBtn.setIcon(QIcon(config.iconPath + self.SCREEN_ORIENTATION_ICON[self._screenOrientation]))
-        self._controller.OnChangeOrientation(self._screenOrientation)
-    # enddef
-
     def EventToggleTouch(self, checked):
         self._toggleTouchBtn.setIcon(QIcon(self._toggle_touch_icon(checked)))
         self._controller.OnToggleTouch(checked)
@@ -387,13 +386,6 @@ class LidControlView(object):
         self._rotationLockBtn.setIcon(QIcon(self._toggle_rotation_icon(checked)))
         self._controller.OnToggleOrientationLock(checked)
     #enddef
-
-    def EventSubmitLaptopMode(self):
-        self._controller.OnSubmitMode(ScreenControlState.MODE_LAPTOP)
-    #enddef
-
-    def EventSubmitTabletMode(self):
-        self._controller.OnSubmitMode(ScreenControlState.MODE_TABLET)
 
     def SetTouchEnableState(self, enable):
         self._toggleTouchBtn.setIcon(QIcon(self._toggle_touch_icon(enable)))
@@ -506,11 +498,9 @@ if __name__ == '__main__':
     sys.exit(app.exec_())
 
 # notes
-# * spin run through xdm
 # * configure logging properly
 # * pidfile
 # * don't run (and then close) onboard if it was already running
-# * an easy way to enable touch
 # * large close button 
 
 
